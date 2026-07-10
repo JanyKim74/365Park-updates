@@ -1,0 +1,159 @@
+name: Publish server_version.json
+
+# 릴리스를 "Publish"하는 순간 자동 실행됩니다.
+# (Draft 상태로 저장만 하면 실행되지 않습니다 — 반드시 Publish 해야 함)
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  publish-version-json:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: 저장소 체크아웃 (main 브랜치)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: 채널 결정 (pre-release 체크박스 기준)
+        id: channel
+        run: |
+          if [ "${{ github.event.release.prerelease }}" = "true" ]; then
+            echo "value=BETA" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=STABLE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 릴리스 첨부파일 다운로드
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p assets
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "*.zip" \
+            --dir assets
+
+          echo "── 다운로드된 파일 목록 ──"
+          ls -la assets
+
+      - name: 런처 / 게임 파일 판별 + 해시 계산 + URL 생성
+        id: files
+        run: |
+          set -e
+          TAG="${{ github.event.release.tag_name }}"
+          REPO="${{ github.repository }}"
+
+          LAUNCHER_FILE=$(ls assets | grep -i "launcher" || true)
+          GAME_FILE=$(ls assets | grep -vi "launcher" || true)
+
+          if [ -n "$LAUNCHER_FILE" ]; then
+            LAUNCHER_HASH=$(sha256sum "assets/$LAUNCHER_FILE" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')
+            LAUNCHER_URL="https://github.com/${REPO}/releases/download/${TAG}/${LAUNCHER_FILE}"
+            echo "launcher_url=$LAUNCHER_URL" >> "$GITHUB_OUTPUT"
+            echo "launcher_hash=$LAUNCHER_HASH" >> "$GITHUB_OUTPUT"
+            echo "런처 파일 감지: $LAUNCHER_FILE"
+          else
+            echo "launcher_url=" >> "$GITHUB_OUTPUT"
+            echo "launcher_hash=" >> "$GITHUB_OUTPUT"
+            echo "이번 릴리스에는 런처 파일이 없습니다 (이전 값 유지 예정)"
+          fi
+
+          if [ -n "$GAME_FILE" ]; then
+            GAME_HASH=$(sha256sum "assets/$GAME_FILE" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')
+            GAME_URL="https://github.com/${REPO}/releases/download/${TAG}/${GAME_FILE}"
+            echo "game_url=$GAME_URL" >> "$GITHUB_OUTPUT"
+            echo "game_hash=$GAME_HASH" >> "$GITHUB_OUTPUT"
+            echo "게임 파일 감지: $GAME_FILE"
+          else
+            echo "game_url=" >> "$GITHUB_OUTPUT"
+            echo "game_hash=" >> "$GITHUB_OUTPUT"
+            echo "이번 릴리스에는 게임 파일이 없습니다 (이전 값 유지 예정)"
+          fi
+
+      - name: URL 실제 접근 가능 여부 검증 (404면 여기서 실패)
+        run: |
+          set -e
+          check_url() {
+            local label="$1"
+            local url="$2"
+            if [ -z "$url" ]; then return 0; fi
+            status=$(curl -s -o /dev/null -w "%{http_code}" -L "$url")
+            if [ "$status" != "200" ]; then
+              echo "::error::$label URL이 응답하지 않습니다 (HTTP $status): $url"
+              exit 1
+            fi
+            echo "$label URL 확인됨 (HTTP $status): $url"
+          }
+          check_url "런처" "${{ steps.files.outputs.launcher_url }}"
+          check_url "게임" "${{ steps.files.outputs.game_url }}"
+
+      - name: server_version.json 갱신
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
+          CHANNEL: ${{ steps.channel.outputs.value }}
+          RELEASE_NOTES: ${{ github.event.release.body }}
+          RELEASE_DATE: ${{ github.event.release.published_at }}
+          LAUNCHER_URL: ${{ steps.files.outputs.launcher_url }}
+          LAUNCHER_HASH: ${{ steps.files.outputs.launcher_hash }}
+          GAME_URL: ${{ steps.files.outputs.game_url }}
+          GAME_HASH: ${{ steps.files.outputs.game_hash }}
+        run: |
+          python3 - << 'EOF'
+          import json
+          import os
+          from pathlib import Path
+
+          json_path = Path("server_version.json")
+          entries = []
+          if json_path.exists() and json_path.stat().st_size > 0:
+              with open(json_path, encoding="utf-8") as f:
+                  entries = json.load(f)
+
+          # 태그명(v0.0.4)에서 앞의 'v' 제거 -> 0.0.4
+          version = os.environ["VERSION"].lstrip("vV")
+          channel = os.environ["CHANNEL"]
+          notes = os.environ.get("RELEASE_NOTES") or ""
+          date = os.environ["RELEASE_DATE"]
+
+          launcher_url = os.environ.get("LAUNCHER_URL") or ""
+          launcher_hash = os.environ.get("LAUNCHER_HASH") or ""
+          game_url = os.environ.get("GAME_URL") or ""
+          game_hash = os.environ.get("GAME_HASH") or ""
+
+          prev = entries[0] if entries else {}
+
+          entry = {
+              "launcherVersion": version if launcher_url else prev.get("launcherVersion", version),
+              "launcherUrl": launcher_url or prev.get("launcherUrl", ""),
+              "launcherHash": launcher_hash or prev.get("launcherHash", ""),
+              "gameVersion": version if game_url else prev.get("gameVersion", version),
+              "gameUrl": game_url or prev.get("gameUrl", ""),
+              "gameHash": game_hash or prev.get("gameHash", ""),
+              "releaseNotes": notes,
+              "releaseDate": date,
+              "channel": channel,
+          }
+
+          entries = [entry] + entries
+
+          with open(json_path, "w", encoding="utf-8") as f:
+              json.dump(entries, f, ensure_ascii=False, indent=2)
+
+          print("새 항목:")
+          print(json.dumps(entry, ensure_ascii=False, indent=2))
+          EOF
+
+      - name: git commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add server_version.json
+          git diff --cached --quiet && echo "변경사항 없음" && exit 0
+          git commit -m "chore: server_version.json 자동 갱신 (${{ github.event.release.tag_name }})"
+          git push
