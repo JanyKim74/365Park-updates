@@ -1,12 +1,12 @@
 [
   {
-    "launcherVersion": "0.0.2",
-    "launcherUrl": "https://github.com/JanyKim74/365Park-updates/releases/download/v0.0.2/365ParkGolf_Launcher_2026071001.zip",
+    "launcherVersion": "0.0.3",
+    "launcherUrl": "https://github.com/JanyKim74/365Park-updates/releases/download/v0.0.3/365ParkGolf_Launcher_2026071001.zip",
     "launcherHash": "3DF7B0CF133E6094C63C4FE3B77996F3665E859414092A805285CF3856B24986",
-    "gameVersion": "0.0.2",
-    "gameUrl": "https://github.com/JanyKim74/365Park-updates/releases/download/v0.0.2/365ParkGolf_2026071001.zip",
+    "gameVersion": "0.0.3",
+    "gameUrl": "https://github.com/JanyKim74/365Park-updates/releases/download/v0.0.3/365ParkGolf_2026071001.zip",
     "gameHash": "03D17049C698CC1701E9B8B211234437AAC3EDDE414CEC6D5C47B14299E17F50",
-    "releaseNotes": "런처업데이트 0.0.2\n게임업데이트 0.0.2",
+    "releaseNotes": "런처업데이트 0.0.3\n게임업데이트 0.0.3",
     "releaseDate": "2026-07-09T00:00:00.000Z",
     "channel": "STABLE"
   }
